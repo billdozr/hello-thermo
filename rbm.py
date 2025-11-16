@@ -68,7 +68,7 @@ data = jnp.array(data_np, dtype=jnp.bool_)
 
 key = jax.random.key(0)
 
-n_hidden = 8  # small model for first pass
+n_hidden = 16
 
 # Create spin nodes
 visible_nodes = [SpinNode() for _ in range(n_visible)]
