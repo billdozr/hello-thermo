@@ -60,6 +60,9 @@ for i, ax in enumerate(axes.flatten()):
     ax.axis("off")
 fig.suptitle("Bars & Stripes samples")
 plt.tight_layout()
+plt.savefig("01_dataset_samples.png", dpi=150, bbox_inches="tight")
+print("Saved: 01_dataset_samples.png")
+plt.close()
 
 data = jnp.array(data_np, dtype=jnp.bool_)
 
@@ -268,16 +271,29 @@ for epoch in range(n_epochs):
             f"Epoch {epoch:3d} | recon MSE={mse:.4f}  BCE={bce:.4f}  ||W||={weight_norm_history[-1]:.3f}"
         )
 
-fig, ax = plt.subplots(1, 2, figsize=(10, 3))
+fig, ax = plt.subplots(1, 3, figsize=(14, 3))
 ax[0].plot(recon_mse_history)
 ax[0].set_title("Reconstruction MSE")
 ax[0].set_xlabel("Epoch")
+ax[0].set_ylabel("MSE")
+ax[0].grid(True, alpha=0.3)
 
 ax[1].plot(recon_bce_history)
 ax[1].set_title("Reconstruction BCE")
 ax[1].set_xlabel("Epoch")
+ax[1].set_ylabel("BCE")
+ax[1].grid(True, alpha=0.3)
+
+ax[2].plot(weight_norm_history)
+ax[2].set_title("Weight Norm ||W||")
+ax[2].set_xlabel("Epoch")
+ax[2].set_ylabel("L2 Norm")
+ax[2].grid(True, alpha=0.3)
 
 plt.tight_layout()
+plt.savefig("02_training_curves.png", dpi=150, bbox_inches="tight")
+print("Saved: 02_training_curves.png")
+plt.close()
 
 
 def plot_hidden_filters(weights, side, n_visible, n_hidden, n_cols=8):
@@ -287,10 +303,20 @@ def plot_hidden_filters(weights, side, n_visible, n_hidden, n_cols=8):
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(1.6 * n_cols, 1.6 * n_rows))
     axes = np.atleast_2d(axes)
 
+    # Find global min/max for consistent colormap scaling
+    vmax = np.abs(W).max()
+    vmin = -vmax
+
     for j in range(n_hidden):
         r, c = divmod(j, n_cols)
         ax = axes[r, c]
-        ax.imshow(W[:, j].reshape(side, side), cmap="bwr", interpolation="nearest")
+        ax.imshow(
+            W[:, j].reshape(side, side),
+            cmap="bwr",
+            interpolation="nearest",
+            vmin=vmin,
+            vmax=vmax,
+        )
         ax.set_xticks([])
         ax.set_yticks([])
         ax.set_title(f"h{j}", fontsize=8)
@@ -302,27 +328,46 @@ def plot_hidden_filters(weights, side, n_visible, n_hidden, n_cols=8):
 
     fig.suptitle("Hidden-unit filters (visible → hidden couplings)")
     plt.tight_layout()
+    return fig
 
 
-plot_hidden_filters(weights, side, n_visible, n_hidden)
+fig_filters = plot_hidden_filters(weights, side, n_visible, n_hidden)
+fig_filters.savefig("03_hidden_filters.png", dpi=150, bbox_inches="tight")
+print("Saved: 03_hidden_filters.png")
+plt.close()
 
 # Use the last v_recon_samples from the training loop:
 recon_np = np.array(v_recon_samples.astype(jnp.float32))
 
 num_show = min(8, n_samples)
-fig, axes = plt.subplots(2, num_show, figsize=(1.6 * num_show, 3))
+fig, axes = plt.subplots(2, num_show, figsize=(1.6 * num_show, 3.5))
 
 for i in range(num_show):
     axes[0, i].imshow(
         data_np[i].reshape(side, side), cmap="gray_r", interpolation="nearest"
     )
     axes[0, i].axis("off")
-    axes[0, i].set_title("data", fontsize=8)
+    if i == 0:
+        axes[0, i].set_ylabel("Original", fontsize=10, rotation=0, ha="right")
+    axes[0, i].set_title(f"#{i}", fontsize=8)
 
     axes[1, i].imshow(
         recon_np[i].reshape(side, side), cmap="gray_r", interpolation="nearest"
     )
     axes[1, i].axis("off")
-    axes[1, i].set_title("recon", fontsize=8)
+    if i == 0:
+        axes[1, i].set_ylabel("Reconstruction", fontsize=10, rotation=0, ha="right")
 
+fig.suptitle("Data vs One-Step Reconstructions", fontsize=12)
 plt.tight_layout()
+plt.savefig("04_reconstructions.png", dpi=150, bbox_inches="tight")
+print("Saved: 04_reconstructions.png")
+plt.close()
+
+print("\n" + "=" * 60)
+print("Training complete! Generated visualizations:")
+print("  01_dataset_samples.png    - Original bars & stripes dataset")
+print("  02_training_curves.png    - MSE, BCE, and weight norm over time")
+print("  03_hidden_filters.png     - Learned hidden unit filters")
+print("  04_reconstructions.png    - Original vs reconstructed samples")
+print("=" * 60)
