@@ -239,6 +239,7 @@ for epoch in range(n_epochs):
     )
 
     # Estimate KL gradients from data vs model
+    # Gradients of the Kullback-Leibler (KL) divergence
     key, k_grad = jax.random.split(key)
     weight_grads, bias_grads, pos_moments, neg_moments = estimate_kl_grad(
         k_grad,
