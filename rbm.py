@@ -44,9 +44,17 @@ def make_bars_stripes(side: int, include_all: bool = False) -> np.ndarray:
     return patterns.reshape(len(patterns), side * side)
 
 
-# Tiny dataset: 4x4 bars & stripes
-side = 4
-data_np = make_bars_stripes(side)
+side = 8  # 8x8 bars & stripes
+
+# All 8x8 bars & stripes patterns:
+data_np_all = make_bars_stripes(side)
+
+# Optional: subsample for speed (508 total BAS patterns for 8x8).
+rng = np.random.RandomState(0)
+n_train = 256  # or 512, or len(data_np_all)
+idx = rng.choice(len(data_np_all), size=n_train, replace=False)
+data_np = data_np_all[idx]
+
 n_samples, n_visible = data_np.shape
 
 print("Data shape:", data_np.shape)
@@ -69,7 +77,7 @@ data = jnp.array(data_np, dtype=jnp.bool_)
 
 key = jax.random.key(0)
 
-n_hidden = 16
+n_hidden = 128
 
 # Create spin nodes
 visible_nodes = [SpinNode() for _ in range(n_visible)]
@@ -114,9 +122,9 @@ schedule_positive = SamplingSchedule(
 )
 
 schedule_negative = SamplingSchedule(
-    n_warmup=20,
+    n_warmup=50,   # more burn-in for bigger model
     n_samples=20,
-    steps_per_sample=2,
+    steps_per_sample=5,
 )
 
 training_spec = IsingTrainingSpec(
@@ -261,8 +269,9 @@ def gibbs_python_baseline(
 learning_rate = 0.05
 n_epochs = 200
 
-n_chains_pos = 1  # positive phase: 1 chain per mini-ensemble
-n_chains_neg = n_samples  # negative phase: parallel chains
+# Number of chains per phase
+n_chains_pos = 16     # positive phase: 16 chains sharing the data
+n_chains_neg = 256    # negative phase: 256 parallel fantasy chains
 
 recon_mse_history = []
 recon_bce_history = []
@@ -401,26 +410,55 @@ plt.close()
 recon_np = np.array(v_recon_samples.astype(jnp.float32))
 
 num_show = min(8, n_samples)
-fig, axes = plt.subplots(2, num_show, figsize=(1.6 * num_show, 3.5))
+
+fig, axes = plt.subplots(
+    2, num_show,
+    figsize=(2.0 * num_show, 4.0),  # wider + taller than before
+    constrained_layout=False,
+)
+
+# Make sure axes is 2D array even if num_show == 1
+axes = np.atleast_2d(axes)
 
 for i in range(num_show):
+    # ---------- Original ----------
     axes[0, i].imshow(
-        data_np[i].reshape(side, side), cmap="gray_r", interpolation="nearest"
+        data_np[i].reshape(side, side),
+        cmap="gray_r",
+        interpolation="nearest",
     )
     axes[0, i].axis("off")
-    if i == 0:
-        axes[0, i].set_ylabel("Original", fontsize=10, rotation=0, ha="right")
-    axes[0, i].set_title(f"#{i}", fontsize=8)
+    axes[0, i].set_title(f"#{i}", fontsize=10)
 
+    # ---------- Reconstruction ----------
     axes[1, i].imshow(
-        recon_np[i].reshape(side, side), cmap="gray_r", interpolation="nearest"
+        recon_np[i].reshape(side, side),
+        cmap="gray_r",
+        interpolation="nearest",
     )
     axes[1, i].axis("off")
-    if i == 0:
-        axes[1, i].set_ylabel("Reconstruction", fontsize=10, rotation=0, ha="right")
 
-fig.suptitle("Data vs One-Step Reconstructions", fontsize=12)
-plt.tight_layout()
+# Big y‑axis labels for the whole figure (not per‑subplot)
+fig.text(
+    0.01, 0.75, "Original",
+    va="center", ha="left",
+    rotation="vertical", fontsize=12,
+)
+fig.text(
+    0.01, 0.25, "Reconstruction",
+    va="center", ha="left",
+    rotation="vertical", fontsize=12,
+)
+
+fig.suptitle("Data vs One-Step Reconstructions", fontsize=14)
+
+# Adjust layout so labels aren't clipped
+plt.subplots_adjust(
+    left=0.10,       # leave space for the big y labels
+    wspace=0.05,
+    hspace=0.05,
+)
+
 plt.savefig("04_reconstructions.png", dpi=150, bbox_inches="tight")
 print("Saved: 04_reconstructions.png")
 plt.close()
@@ -452,8 +490,20 @@ init_state_free = hinton_init(
 )
 
 # Run THRML Gibbs sampler, requesting only visible nodes
+# --- Warm-up call: triggers JIT compile, not timed ---
 key, subkey = jax.random.split(key)
-t0 = time.perf_counter()
+_ = sample_states(
+    subkey,
+    free_program,
+    free_schedule,
+    init_state_free,
+    state_clamp=[],
+    nodes_to_sample=[Block(visible_nodes)],
+)
+
+# --- Timed call: reuses compiled kernel ---
+key, subkey = jax.random.split(key)
+t0_thrml = time.perf_counter()
 free_samples_struct = sample_states(
     subkey,
     free_program,
@@ -462,8 +512,8 @@ free_samples_struct = sample_states(
     state_clamp=[],
     nodes_to_sample=[Block(visible_nodes)],
 )
-thrml_elapsed = time.perf_counter() - t0
-print(f"THRML free-running sampling elapsed: {thrml_elapsed:.4f} s")
+thrml_elapsed = time.perf_counter() - t0_thrml
+print(f"THRML free-running sampling (no compile) elapsed: {thrml_elapsed:.4f} s")
 
 # sample_states returns the final state for each block.
 # free_blocks = [Block(visible_nodes), Block(hidden_nodes)]
