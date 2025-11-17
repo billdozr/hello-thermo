@@ -268,7 +268,7 @@ def gibbs_python_baseline(
     return samples
 
 learning_rate = 0.05
-n_epochs = 50  # Reduced for faster training (was 200)
+n_epochs = 200
 
 # Number of chains per phase (reduced for speed)
 n_chains_pos = 4      # positive phase: 4 chains sharing the data (was 16)
