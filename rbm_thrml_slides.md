@@ -58,6 +58,20 @@ We train RBM parameters:
 
 ---
 
+# **Our RBM/Ising energy function**
+
+<div align="center">
+  <img src="energy_function.png" width="80%">
+</div>
+
+directly taken from the Gibbs/Ising Hamiltonian, and each sum corresponds to a physical energy term
+
+- 1st term, external field on visible spins
+- 2nd term, external field on hidden spins
+- Pairwise interaction energy
+
+---
+
 # **Training Curves**
 
 - **MSE** drops sharply → good reconstructions  
