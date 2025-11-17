@@ -4,166 +4,154 @@ A Restricted Boltzmann Machine (RBM) implementation using the THRML library's ha
 
 ## Overview
 
-This project implements **Idea 13** from the THRML project ideas: a Boltzmann machine trained using THRML's efficient sampling infrastructure. The implementation demonstrates:
+This project demonstrates training an RBM on the bars-and-stripes pattern recognition task using THRML's Ising model framework for efficient Gibbs sampling. The implementation showcases both THRML's accelerated sampling and includes a naive Python baseline for performance comparison.
 
--  RBM architecture with SpinNodes for binary visible/hidden units
--  Energy-based model formulation using SpinEBMFactor
--  Block Gibbs sampling for conditional distributions
--  Contrastive Divergence (CD-k) training algorithm
--  Visualization of learned filters and reconstructions
--  Bars-and-stripes toy dataset
+## What is an RBM?
+
+A Restricted Boltzmann Machine is an energy-based probabilistic graphical model with:
+- **Visible layer**: Input data (64 pixels for 8×8 images)
+- **Hidden layer**: Latent features (128 units)
+- **Bipartite structure**: Connections only between layers, not within layers
+
+The model learns to represent data patterns through an energy function formulated as an Ising model:
+```
+E(v,h) = -β(Σ b_i s_i + Σ J_ij s_i s_j)
+```
 
 ## Architecture
 
-### Model Structure
-- **Visible units**: 16 (4�4 images)
-- **Hidden units**: 8
-- **Energy function**: E(v,h) = -v^T W h - a^T v - b^T h
-- **Node type**: SpinNode (binary {0,1} values)
+### Model Configuration
+- **Visible units**: 64 (8×8 pixel grid)
+- **Hidden units**: 128
+- **Training data**: 256 bars-and-stripes patterns (subsampled from 508 total)
+- **Inverse temperature (β)**: 1.0
+- **Learning rate**: 0.05
+- **Training epochs**: 200
 
-### Key Components
+### Training Strategy
 
-1. **Dataset Generation** ([rbm_thrml.py:38](rbm_thrml.py#L38))
-   - Generates horizontal bars and vertical stripes
-   - 4�4 binary images
-   - Converts to {-1, +1} for THRML compatibility
+**Positive Phase** (data-driven):
+- Visible units clamped to data
+- 16 parallel chains sampling hidden units
+- Schedule: 20 warmup steps, 20 samples, 2 steps between samples
 
-2. **RBM Class** ([rbm_thrml.py:94](rbm_thrml.py#L94))
-   - Visible and hidden SpinNode blocks
-   - Weight matrix W, biases a and b
-   - Energy factors using SpinEBMFactor
+**Negative Phase** (model-driven):
+- Both visible and hidden units free
+- 256 parallel fantasy chains
+- Schedule: 50 warmup steps, 20 samples, 5 steps between samples
 
-3. **Sampling Methods** ([rbm_thrml.py:201](rbm_thrml.py#L201))
-   - `sample_given_visible()`: Sample hidden units given visible
-   - `sample_given_hidden()`: Sample visible units given hidden
-   - Uses FactorSamplingProgram with BlockGibbsSpec
+**Gradient Estimation**:
+Uses Contrastive Divergence via THRML's `estimate_kl_grad()` to compute KL divergence gradients with respect to biases and weights.
 
-4. **Training** ([rbm_thrml.py:313](rbm_thrml.py#L313))
-   - Contrastive Divergence (CD-1) algorithm
-   - Mini-batch gradient updates
-   - Positive phase: data-clamped sampling
-   - Negative phase: free-running Gibbs sampling
+## Key Components
 
-## Usage
+### 1. Data Generation ([rbm.py:21-44](rbm.py#L21-L44))
+`make_bars_stripes()` generates binary patterns with horizontal/vertical bars:
+- Each pattern is a subset of rows (horizontal) or columns (vertical) turned ON
+- Excludes all-black and all-white patterns
+- Returns 8×8 flattened boolean arrays
+
+### 2. THRML Integration ([rbm.py:83-106](rbm.py#L83-L106))
+Constructs an `IsingEBM` model:
+- Creates `SpinNode` objects for visible/hidden units
+- Defines fully-connected bipartite edges
+- Initializes small random biases and weights
+
+### 3. Conditional Sampling ([rbm.py:159-186](rbm.py#L159-L186))
+Implements exact Ising conditionals:
+- `sample_hidden_given_visible()`: P(h|v) using field h_j = b_j + Σ_i J_ij s_i
+- `sample_visible_given_hidden()`: P(v|h) using field v_i = b_i + Σ_j J_ij s_j
+- Bernoulli sampling with probability σ(2βh) where σ is sigmoid
+
+### 4. Training Loop ([rbm.py:311-373](rbm.py#L311-L373))
+For each epoch:
+1. Initialize positive/negative chain states with `hinton_init()`
+2. Estimate gradients via `estimate_kl_grad()` using data and model samples
+3. Gradient descent: update biases and weights
+4. Track reconstruction error (MSE, BCE) and weight norm
+
+### 5. Free-Running Sampling ([rbm.py:472-563](rbm.py#L472-L563))
+After training, generates unconditioned samples:
+- Uses THRML's `sample_states()` with both layers free
+- Schedule: 300 warmup, 16 samples, 20 steps between samples
+- Demonstrates what patterns the model has learned
+
+### 6. Python Baseline ([rbm.py:241-298](rbm.py#L241-L298))
+`gibbs_python_baseline()` implements naive block Gibbs in NumPy:
+- Manual alternating updates of hidden then visible layers
+- Same sampling schedule as THRML for fair comparison
+- Pure Python loops (no JIT compilation)
+
+## Outputs
+
+The script generates six visualizations:
+
+1. **01_dataset_samples.png** - Sample bars-and-stripes training data
+2. **02_training_curves.png** - MSE, BCE, and weight norm over 200 epochs
+3. **03_hidden_filters.png** - 128 learned feature detectors (weights reshaped to 8×8)
+4. **04_reconstructions.png** - Original vs one-step reconstructed images
+5. **05_free_running_samples.png** - 16 patterns generated by THRML sampler
+6. **06_free_running_python_samples.png** - 16 patterns from Python baseline
+
+## Performance Comparison
+
+The implementation includes timing benchmarks comparing THRML's hardware-optimized Gibbs sampling against a naive Python implementation. THRML leverages JAX's JIT compilation and XLA optimization for significant speedup.
+
+Expected output:
+```
+THRML free-running sampling (no compile) elapsed: X.XXXX s
+Naive Python Gibbs sampling elapsed: Y.YYYY s
+Speed ratio (Python / THRML): ZZ.ZZx slower
+```
+
+## How It Works
+
+### Energy-Based Learning
+
+The RBM learns by adjusting its energy landscape to:
+- **Lower energy** for observed data patterns (positive phase)
+- **Raise energy** for model-generated patterns (negative phase)
+
+This is achieved through gradient descent on the KL divergence between data and model distributions.
+
+### Ising Model Formulation
+
+THRML represents the RBM as an Ising spin glass:
+- Boolean pixels {0,1} map to spins {-1,+1}
+- Biases become local fields
+- Weights become coupling constants
+- Exact conditional distributions enable efficient block Gibbs sampling
+
+### Block Gibbs Sampling
+
+Since layers are conditionally independent given the other layer:
+- All hidden units can be sampled in parallel given visible states
+- All visible units can be sampled in parallel given hidden states
+- This bipartite structure enables efficient hardware parallelization
+
+## Running the Code
 
 ```bash
-# Run the demo
-uv run python rbm_thrml.py
+python rbm.py
 ```
 
 This will:
 1. Generate the bars-and-stripes dataset
-2. Initialize an RBM with 16 visible and 8 hidden units
-3. Train using CD-1 for 100 epochs
-4. Visualize learned filters and reconstructions
-5. Compute reconstruction error
+2. Train the RBM for 200 epochs (~2-5 minutes depending on hardware)
+3. Generate all visualization plots
+4. Print training progress and performance metrics
+5. Save outputs to current directory
 
-## Results
+## Requirements
 
-### Generated Files
-- `bars_and_stripes_examples.png` - Sample dataset images
-- `rbm_filters.png` - Learned weight filters (8 hidden units)
-- `rbm_reconstructions.png` - Original vs reconstructed images
+- JAX
+- NumPy
+- Matplotlib
+- THRML library
 
-### Performance
-- **Reconstruction error**: ~0.48 (48% pixel mismatch)
-- **Training time**: Fast thanks to THRML's JAX-based implementation
+## Technical Details
 
-## Technical Highlights
-
-### THRML Integration
-
-The implementation showcases THRML's key features:
-
-1. **Block Structure**: Separate blocks for visible and hidden units enable efficient bipartite Gibbs sampling
-
-2. **Energy Factors**:
-   - Unary factors for biases (visible and hidden)
-   - Pairwise factors for interactions (creating edges between all visible-hidden pairs)
-
-3. **Custom Observer**: FinalStateObserver to handle heterogeneous block sizes ([rbm_thrml.py:27](rbm_thrml.py#L27))
-
-4. **Conditional Sampling**: Uses SpinGibbsConditional for efficient spin-valued Gibbs updates
-
-### Key Implementation Details
-
-**Factor Construction** ([rbm_thrml.py:133](rbm_thrml.py#L133)):
-```python
-# Create edges for all visible-hidden pairs
-for i, v_node in enumerate(self.visible_nodes):
-    for j, h_node in enumerate(self.hidden_nodes):
-        visible_edges.append(v_node)
-        hidden_edges.append(h_node)
-        edge_weights.append(-self.W[i, j])
-
-interaction_factor = SpinEBMFactor(
-    node_groups=[Block(visible_edges), Block(hidden_edges)],
-    weights=jnp.array(edge_weights)
-)
-```
-
-This creates a bipartite graph where each visible unit connects to each hidden unit, as required by the RBM architecture.
-
-**CD-k Training** ([rbm_thrml.py:313](rbm_thrml.py#L313)):
-```python
-# Positive phase: clamp visible to data
-h_pos = self.sample_given_visible(key_pos, data, n_steps=1)
-
-# Negative phase: alternate k times
-for i in range(k):
-    v_neg = self.sample_given_hidden(key_v, h_neg, n_steps=1)
-    h_neg = self.sample_given_visible(key_h, v_neg, n_steps=1)
-
-# Compute gradients from positive and negative statistics
-grad_W = pos_weights - neg_weights
-```
-
-## Limitations & Future Work
-
-### Current Limitations
-
-1. **Poor Reconstruction Quality**: The current implementation shows ~48% reconstruction error, suggesting:
-   - Insufficient model capacity (only 8 hidden units)
-   - Suboptimal hyperparameters
-   - Need for longer training or better initialization
-
-2. **Sampling Architecture**: The bipartite edge construction creates n_visible � n_hidden edges, which may not be the most efficient THRML representation
-
-### Potential Improvements
-
-1. **Architecture**:
-   - Increase hidden units (try 16-32)
-   - Add momentum to parameter updates
-   - Implement weight decay regularization
-
-2. **Training**:
-   - Use CD-k with k>1 for better gradient estimates
-   - Implement persistent CD (PCD) for faster convergence
-   - Add learning rate scheduling
-
-3. **THRML Optimization**:
-   - Investigate alternative factor structures
-   - Explore using categorical nodes instead of spin nodes
-   - Benchmark against naive Python Gibbs sampling
-
-4. **Evaluation**:
-   - Add pseudo-likelihood metric
-   - Compute partition function estimates
-   - Generate samples from the model
-
-## Dependencies
-
-- JAX >= 0.4
-- THRML >= 0.1.3
-- NumPy >= 2.3
-- Matplotlib >= 3.10
-
-## References
-
-- Hinton, G. E. (2002). Training products of experts by minimizing contrastive divergence
-- Fischer, A., & Igel, C. (2012). An introduction to restricted Boltzmann machines
-- THRML Documentation: Hardware-efficient probabilistic inference
-
-## License
-
-MIT
+- **Initialization**: Small random weights/biases (0.01 × N(0,1))
+- **Vectorization**: Uses `jax.vmap` for parallel reconstruction error computation
+- **JIT compilation**: THRML automatically JIT-compiles sampling kernels
+- **Memory efficiency**: Block structure avoids explicit full-graph representations
