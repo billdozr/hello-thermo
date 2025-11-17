@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -198,6 +199,65 @@ def reconstruction_error(key, data_bool, biases, weights, beta, n_visible, n_hid
     return key, mse, bce, v_samples
 
 
+def gibbs_python_baseline(
+    biases,
+    weights,
+    beta,
+    n_visible,
+    n_hidden,
+    warmup: int,
+    n_samples: int,
+    steps_per_sample: int,
+    n_chains: int = 1,
+    seed: int = 0,
+):
+    """
+    Naive block-Gibbs sampler for the RBM using pure NumPy and Python loops.
+    - biases: array of shape [n_visible + n_hidden]
+    - weights: array of shape [n_edges], corresponding to a full bipartite W
+    - beta: scalar inverse temperature
+    - Schedule mirrors THRML: warmup, then n_samples with steps_per_sample between them.
+    Returns: samples of shape [n_samples, n_chains, n_visible] as booleans.
+    """
+    rng = np.random.RandomState(seed)
+
+    # Convert params to NumPy & unpack into visible/hidden parts
+    b = np.asarray(biases, dtype=np.float64)
+    W = np.asarray(weights, dtype=np.float64).reshape(n_visible, n_hidden)
+
+    b_v = b[:n_visible]
+    b_h = b[n_visible:]
+
+    # Initial random spins
+    v = rng.rand(n_chains, n_visible) < 0.5   # bool
+    h = rng.rand(n_chains, n_hidden) < 0.5
+
+    def bools_to_spins_np(x_bool):
+        return np.where(x_bool, 1.0, -1.0)
+
+    recorded = []
+    total_steps = warmup + n_samples * steps_per_sample
+
+    for t in range(total_steps):
+        # ---- Update hidden given visible ----
+        s_v = bools_to_spins_np(v)                         # [C, V]
+        field_h = b_h + s_v @ W                            # [C, H]
+        probs_h = 1.0 / (1.0 + np.exp(-2.0 * beta * field_h))
+        h = rng.rand(*h.shape) < probs_h                   # bool
+
+        # ---- Update visible given hidden ----
+        s_h = bools_to_spins_np(h)                         # [C, H]
+        field_v = b_v + s_h @ W.T                          # [C, V]
+        probs_v = 1.0 / (1.0 + np.exp(-2.0 * beta * field_v))
+        v = rng.rand(*v.shape) < probs_v                   # bool
+
+        # Record samples in the same pattern as THRML:
+        if t >= warmup and (t - warmup) % steps_per_sample == 0:
+            recorded.append(v.copy())
+
+    samples = np.stack(recorded, axis=0)  # [n_samples, n_chains, n_visible]
+    return samples
+
 learning_rate = 0.05
 n_epochs = 200
 
@@ -393,14 +453,17 @@ init_state_free = hinton_init(
 
 # Run THRML Gibbs sampler, requesting only visible nodes
 key, subkey = jax.random.split(key)
+t0 = time.perf_counter()
 free_samples_struct = sample_states(
     subkey,
     free_program,
     free_schedule,
     init_state_free,
-    state_clamp=[],  # nothing clamped
+    state_clamp=[],
     nodes_to_sample=[Block(visible_nodes)],
 )
+thrml_elapsed = time.perf_counter() - t0
+print(f"THRML free-running sampling elapsed: {thrml_elapsed:.4f} s")
 
 # sample_states returns the final state for each block.
 # free_blocks = [Block(visible_nodes), Block(hidden_nodes)]
@@ -447,11 +510,69 @@ plt.savefig("05_free_running_samples.png", dpi=150, bbox_inches="tight")
 print("Saved: 05_free_running_samples.png")
 plt.close()
 
+# ============================================================
+# 8. Naive Python Gibbs baseline (no THRML)
+# ============================================================
+
+# Use the same schedule as THRML for fairness
+warmup = free_schedule.n_warmup
+steps_per_sample = free_schedule.steps_per_sample
+n_samples_python = n_model_samples
+
+biases_np = np.array(biases)
+weights_np = np.array(weights)
+beta_scalar = float(beta)
+
+t0 = time.perf_counter()
+python_samples = gibbs_python_baseline(
+    biases_np,
+    weights_np,
+    beta_scalar,
+    n_visible,
+    n_hidden,
+    warmup=warmup,
+    n_samples=n_samples_python,
+    steps_per_sample=steps_per_sample,
+    n_chains=1,      # one chain, 16 samples over time (like THRML)
+    seed=0,
+)
+python_elapsed = time.perf_counter() - t0
+print(f"Naive Python Gibbs sampling elapsed: {python_elapsed:.4f} s")
+if thrml_elapsed > 0:
+    print(f"Speed ratio (Python / THRML): {python_elapsed / thrml_elapsed:.2f}x slower")
+
+# python_samples: [n_samples, 1, n_visible] -> [n_samples, n_visible]
+python_vis_samples = python_samples[:, 0, :]
+
+# Plot them in the same 1×16 grid layout
+n_show = python_vis_samples.shape[0]
+fig, axes = plt.subplots(1, n_show, figsize=(1.6 * n_show, 1.6))
+if n_show == 1:
+    axes = [axes]
+
+for i in range(n_show):
+    ax = axes[i]
+    ax.imshow(
+        python_vis_samples[i].reshape(side, side),
+        cmap="gray_r",
+        interpolation="nearest",
+    )
+    ax.axis("off")
+    ax.set_title(f"{i}", fontsize=8)
+
+fig.suptitle("Free-running naive Python RBM samples", fontsize=12)
+plt.tight_layout()
+plt.savefig("06_free_running_python_samples.png", dpi=150, bbox_inches="tight")
+print("Saved: 06_free_running_python_samples.png")
+plt.close()
+
 print("\n" + "=" * 60)
 print("Training complete! Generated visualizations:")
-print("  01_dataset_samples.png      - Original bars & stripes dataset")
-print("  02_training_curves.png      - MSE, BCE, and weight norm over time")
-print("  03_hidden_filters.png       - Learned hidden unit filters")
-print("  04_reconstructions.png      - Original vs reconstructed samples")
-print("  05_free_running_samples.png - Free-running THRML RBM samples")
+print("  01_dataset_samples.png             - Original bars & stripes dataset")
+print("  02_training_curves.png             - MSE, BCE, and weight norm over time")
+print("  03_hidden_filters.png              - Learned hidden unit filters")
+print("  04_reconstructions.png             - Original vs reconstructed samples")
+print("  05_free_running_samples.png        - Free-running THRML RBM samples")
+print("  06_free_running_python_samples.png - Free-running naive Python RBM samples")
+
 print("=" * 60)
