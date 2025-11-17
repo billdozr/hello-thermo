@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import jax
 import jax.numpy as jnp
 from jax.nn import sigmoid
+from jax import lax
 
 from thrml.block_management import Block
 from thrml.block_sampling import SamplingSchedule, sample_states
@@ -116,15 +117,15 @@ negative_blocks = [Block(visible_nodes), Block(hidden_nodes)]
 
 # Simple sampling schedules for both phases
 schedule_positive = SamplingSchedule(
-    n_warmup=20,
-    n_samples=20,
-    steps_per_sample=2,
+    n_warmup=10,   # Reduced for speed (was 20)
+    n_samples=10,  # Reduced for speed (was 20)
+    steps_per_sample=1,  # Reduced for speed (was 2)
 )
 
 schedule_negative = SamplingSchedule(
-    n_warmup=50,   # more burn-in for bigger model
-    n_samples=20,
-    steps_per_sample=5,
+    n_warmup=20,   # Reduced for speed (was 50)
+    n_samples=10,  # Reduced for speed (was 20)
+    steps_per_sample=2,  # Reduced for speed (was 5)
 )
 
 training_spec = IsingTrainingSpec(
@@ -267,17 +268,35 @@ def gibbs_python_baseline(
     return samples
 
 learning_rate = 0.05
-n_epochs = 200
+n_epochs = 50  # Reduced for faster training (was 200)
 
-# Number of chains per phase
-n_chains_pos = 16     # positive phase: 16 chains sharing the data
-n_chains_neg = 256    # negative phase: 256 parallel fantasy chains
+# Number of chains per phase (reduced for speed)
+n_chains_pos = 4      # positive phase: 4 chains sharing the data (was 16)
+n_chains_neg = 32     # negative phase: 32 parallel fantasy chains (was 256)
 
-recon_mse_history = []
-recon_bce_history = []
-weight_norm_history = []
 
-for epoch in range(n_epochs):
+def single_epoch(carry, epoch_idx):
+    """
+    Single training epoch function for use with jax.lax.scan.
+    Uses vmap-like vectorization through scan for maximum JIT efficiency.
+    
+    Args:
+        carry: Dictionary containing:
+            - biases: current bias parameters
+            - weights: current weight parameters
+            - key: JAX random key
+        epoch_idx: Current epoch index (unused but required by scan)
+    
+    Returns:
+        (updated_carry, metrics): Updated carry and metrics dictionary
+    """
+    biases = carry['biases']
+    weights = carry['weights']
+    key = carry['key']
+    
+    # Rebuild model from current parameters (avoids PyTree issues)
+    model = IsingEBM(nodes, edges, biases, weights, beta)
+    
     # (Re)build IsingTrainingSpec with current model
     training_spec = IsingTrainingSpec(
         ebm=model,
@@ -325,21 +344,68 @@ for epoch in range(n_epochs):
     biases = biases - learning_rate * bias_grads
     weights = weights - learning_rate * weight_grads
 
-    # Update model object with new parameters
-    model = IsingEBM(nodes, edges, biases, weights, beta)
-
     # Track simple reconstruction error (one-step CD) and weight norm
     key, mse, bce, v_recon_samples = reconstruction_error(
         key, data, biases, weights, beta, n_visible, n_hidden
     )
-    recon_mse_history.append(float(mse))
-    recon_bce_history.append(float(bce))
-    weight_norm_history.append(float(jnp.linalg.norm(weights)))
+    weight_norm = jnp.linalg.norm(weights)
+    
+    # Return updated carry and metrics
+    updated_carry = {
+        'biases': biases,
+        'weights': weights,
+        'key': key,
+    }
+    
+    metrics = {
+        'mse': mse,
+        'bce': bce,
+        'weight_norm': weight_norm,
+        'v_recon_samples': v_recon_samples,
+    }
+    
+    return updated_carry, metrics
 
-    if epoch % 10 == 0 or epoch == n_epochs - 1:
-        print(
-            f"Epoch {epoch:3d} | recon MSE={mse:.4f}  BCE={bce:.4f}  ||W||={weight_norm_history[-1]:.3f}"
-        )
+
+# Initialize carry for scan (no model, rebuild from params each epoch)
+initial_carry = {
+    'biases': biases,
+    'weights': weights,
+    'key': key,
+}
+
+# Create epoch indices (just for iteration, values don't matter)
+epoch_indices = jnp.arange(n_epochs)
+
+# JIT compile the scan operation for maximum speed
+print("Compiling training loop with scan...")
+scan_fn = jax.jit(lambda carry, xs: lax.scan(single_epoch, carry, xs))
+final_carry, all_metrics = scan_fn(initial_carry, epoch_indices)
+
+# Extract final values
+biases = final_carry['biases']
+weights = final_carry['weights']
+key = final_carry['key']
+# Rebuild final model from final parameters
+model = IsingEBM(nodes, edges, biases, weights, beta)
+v_recon_samples = all_metrics['v_recon_samples'][-1]  # Last epoch's reconstruction
+
+# Extract history for plotting
+recon_mse_history = [float(x) for x in all_metrics['mse']]
+recon_bce_history = [float(x) for x in all_metrics['bce']]
+weight_norm_history = [float(x) for x in all_metrics['weight_norm']]
+
+# Print periodic updates (every 10 epochs)
+for epoch in range(0, n_epochs, 10):
+    print(
+        f"Epoch {epoch:3d} | recon MSE={recon_mse_history[epoch]:.4f}  "
+        f"BCE={recon_bce_history[epoch]:.4f}  ||W||={weight_norm_history[epoch]:.3f}"
+    )
+if (n_epochs - 1) % 10 != 0:
+    print(
+        f"Epoch {n_epochs-1:3d} | recon MSE={recon_mse_history[-1]:.4f}  "
+        f"BCE={recon_bce_history[-1]:.4f}  ||W||={weight_norm_history[-1]:.3f}"
+    )
 
 fig, ax = plt.subplots(1, 3, figsize=(14, 3))
 ax[0].plot(recon_mse_history)
@@ -512,6 +578,7 @@ free_samples_struct = sample_states(
     state_clamp=[],
     nodes_to_sample=[Block(visible_nodes)],
 )
+jax.block_until_ready(_[0])
 thrml_elapsed = time.perf_counter() - t0_thrml
 print(f"THRML free-running sampling (no compile) elapsed: {thrml_elapsed:.4f} s")
 
