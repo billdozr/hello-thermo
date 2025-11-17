@@ -6,11 +6,11 @@ import jax.numpy as jnp
 from jax.nn import sigmoid
 
 from thrml.block_management import Block
-from thrml.block_sampling import SamplingSchedule
+from thrml.block_sampling import SamplingSchedule, sample_states
 from thrml.models.ising import (
     IsingEBM,
     IsingTrainingSpec,
-    IsingSamplingProgram,  # not strictly needed yet, but handy
+    IsingSamplingProgram,
     estimate_kl_grad,
     hinton_init,
 )
@@ -365,10 +365,93 @@ plt.savefig("04_reconstructions.png", dpi=150, bbox_inches="tight")
 print("Saved: 04_reconstructions.png")
 plt.close()
 
+# ------------------------------------------------------------
+# 7. Free-running sampling with THRML (no data clamping)
+# ------------------------------------------------------------
+
+free_blocks = negative_blocks
+free_program = IsingSamplingProgram(model, free_blocks, [])
+
+n_model_samples = 16
+
+# We’ll get 16 samples by asking the sampler to produce 16 steps,
+# not by adding a batch dimension to the state.
+free_schedule = SamplingSchedule(
+    n_warmup=300,  # burn-in
+    n_samples=n_model_samples,  # number of *recorded* samples
+    steps_per_sample=20,
+)
+
+# IMPORTANT: scalar chain state => batch_shape=()
+key, subkey = jax.random.split(key)
+init_state_free = hinton_init(
+    subkey,
+    model,
+    free_blocks,
+    batch_shape=(),
+)
+
+# Run THRML Gibbs sampler, requesting only visible nodes
+key, subkey = jax.random.split(key)
+free_samples_struct = sample_states(
+    subkey,
+    free_program,
+    free_schedule,
+    init_state_free,
+    state_clamp=[],  # nothing clamped
+    nodes_to_sample=[Block(visible_nodes)],
+)
+
+# sample_states returns the final state for each block.
+# free_blocks = [Block(visible_nodes), Block(hidden_nodes)]
+# So free_samples_struct[0] is the visible layer, [1] is the hidden layer
+vis_chain = free_samples_struct[0]
+
+# Convert to NumPy and collapse all non-feature axes
+vis_chain_np = np.array(vis_chain)
+
+# We expect the last axis to be n_visible; flatten the rest
+if vis_chain_np.ndim >= 2:
+    if vis_chain_np.shape[-1] != n_visible:
+        # Best-effort reshape if THRML changed internal ordering
+        vis_chain_np = vis_chain_np.reshape(-1, n_visible)
+    else:
+        vis_chain_np = vis_chain_np.reshape(-1, vis_chain_np.shape[-1])
+else:
+    raise RuntimeError(f"Unexpected THRML sample shape: {vis_chain_np.shape}")
+
+# Take the first n_model_samples visible configurations
+model_vis_samples = vis_chain_np[:n_model_samples]
+
+# ------------------------------------------------------------
+# Plot the free-running model samples (no conditioning)
+# ------------------------------------------------------------
+n_show = model_vis_samples.shape[0]
+fig, axes = plt.subplots(1, n_show, figsize=(1.6 * n_show, 1.6))
+if n_show == 1:
+    axes = [axes]
+
+for i in range(n_show):
+    ax = axes[i]
+    ax.imshow(
+        model_vis_samples[i].reshape(side, side),
+        cmap="gray_r",
+        interpolation="nearest",
+    )
+    ax.axis("off")
+    ax.set_title(f"{i}", fontsize=8)
+
+fig.suptitle("Free-running THRML RBM samples", fontsize=12)
+plt.tight_layout()
+plt.savefig("05_free_running_samples.png", dpi=150, bbox_inches="tight")
+print("Saved: 05_free_running_samples.png")
+plt.close()
+
 print("\n" + "=" * 60)
 print("Training complete! Generated visualizations:")
-print("  01_dataset_samples.png    - Original bars & stripes dataset")
-print("  02_training_curves.png    - MSE, BCE, and weight norm over time")
-print("  03_hidden_filters.png     - Learned hidden unit filters")
-print("  04_reconstructions.png    - Original vs reconstructed samples")
+print("  01_dataset_samples.png      - Original bars & stripes dataset")
+print("  02_training_curves.png      - MSE, BCE, and weight norm over time")
+print("  03_hidden_filters.png       - Learned hidden unit filters")
+print("  04_reconstructions.png      - Original vs reconstructed samples")
+print("  05_free_running_samples.png - Free-running THRML RBM samples")
 print("=" * 60)
