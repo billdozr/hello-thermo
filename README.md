@@ -199,8 +199,3 @@ The training loop uses `jax.lax.scan` for efficiency:
 - NumPy
 - Matplotlib
 - THRML library
-
-Install via:
-```bash
-uv sync
-```
