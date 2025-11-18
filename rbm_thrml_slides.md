@@ -8,7 +8,7 @@ color: "#ffffff"
 ---
 
 # THRML-Powered RBM Demonstration
-### *A Thermodynamic Computing Inspired Probabilistic Model*  
+### *Training an RBM on binary bars and stripes data*
 Alen Ribić & Alessio Toniolo, 2025
 
 ---
