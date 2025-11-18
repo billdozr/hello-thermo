@@ -36,18 +36,6 @@ This will:
 
 ## Results
 
-### Training Progress
-
-The model converges rapidly with MSE dropping from 0.24 to near 0.001:
-
-![Training Curves](./images/02_training_curves.png)
-
-### Reconstruction Quality
-
-After training, the model accurately reconstructs bars-and-stripes patterns:
-
-![Reconstructions](./images/04_reconstructions.png)
-
 ## Model Configuration
 
 - **Visible units**: 64 (8×8 pixel grid)
@@ -139,6 +127,12 @@ Sample bars-and-stripes patterns used for training:
 MSE, BCE, and weight norm over 200 epochs showing convergence:
 
 ![Training Curves](./images/02_training_curves.png)
+
+### Learned Hidden Filters
+
+The 128 hidden units learn feature detectors for vertical bars, horizontal bars, and composite patterns:
+
+![Hidden Filters](./images/03_hidden_filters.png)
 
 ### Reconstruction Quality
 
