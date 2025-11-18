@@ -14,9 +14,7 @@ A Restricted Boltzmann Machine is an energy-based probabilistic graphical model 
 - **Bipartite structure**: Connections only between layers, not within layers
 
 The model learns to represent data patterns through an energy function formulated as an Ising model:
-```
-E(v,h) = -β(Σ b_i s_i + Σ J_ij s_i s_j)
-```
+![Energy function](./images/energy_function.png)
 
 ## Running the Code
 
