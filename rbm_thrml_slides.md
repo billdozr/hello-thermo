@@ -37,7 +37,7 @@ Alen Ribić & Alessio Toniolo, 2025
 
 ---
 
-![bg 80%](01_dataset_samples.png)
+![bg 80%](./images/01_dataset_samples.png)
 
 ---
 
@@ -52,16 +52,16 @@ THRML provides:
 - Multi-chain sampling via `batch_shape`
 
 We train RBM parameters:
-- weights \( W \)
-- visible biases \( b_v \), hidden biases \( b_h \)
-- temperature parameter \( \beta \)
+- weights $W$
+- visible biases $b_v$, hidden biases $b_h$
+- temperature parameter $\beta$
 
 ---
 
 # **Our RBM/Ising energy function**
 
 <div align="center">
-  <img src="energy_function.png" width="80%">
+  <img src="./images/energy_function.png" width="80%">
 </div>
 
 directly taken from the Gibbs/Ising Hamiltonian, and each sum corresponds to a physical energy term
@@ -80,7 +80,7 @@ directly taken from the Gibbs/Ising Hamiltonian, and each sum corresponds to a p
 
 ---
 
-![bg 90%](02_training_curves.png)
+![bg 90%](./images/02_training_curves.png)
 
 ---
 
@@ -96,16 +96,16 @@ directly taken from the Gibbs/Ising Hamiltonian, and each sum corresponds to a p
 
 ---
 
-![bg contain](03_hidden_filters.png)
+![bg contain](./images/03_hidden_filters.png)
 
 ---
 
 # **Clamped 1-Step Reconstructions**
 
 Process:
-1. Clamp visibles to data  
-2. Sample \( h \sim p(h|v) \)  
-3. Sample \( v' \sim p(v|h) \)
+1. Clamp visibles to data
+2. Sample $h \sim p(h|v)$
+3. Sample $v' \sim p(v|h)$
 
 Purpose:
 - Validate training
@@ -114,7 +114,7 @@ Purpose:
 
 ---
 
-![bg 80%](04_reconstructions.png)
+![bg 80%](./images/04_reconstructions.png)
 
 ---
 
@@ -129,7 +129,7 @@ Purpose:
 
 ---
 
-![bg 80%](05_free_running_samples.png)
+![bg 80%](./images/05_free_running_samples.png)
 
 ---
 
@@ -146,7 +146,7 @@ Results:
 
 ---
 
-![bg 80%](06_free_running_python_samples.png)
+![bg 80%](./images/06_free_running_python_samples.png)
 
 ---
 
